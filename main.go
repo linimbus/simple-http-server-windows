@@ -30,6 +30,5 @@ func main() {
 		logs.Error(err.Error())
 		return
 	}
-
 	mainWindows()
 }

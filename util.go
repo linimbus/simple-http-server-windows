@@ -1,14 +1,11 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"io"
+	"fmt"
+	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/astaxie/beego/logs"
 )
@@ -33,51 +30,59 @@ func CapSignal(proc func()) {
 	}()
 }
 
-type FileInfo struct {
-	file      string
-	timestamp time.Time
+func ByteView(size int64) string {
+	if size < 1024 {
+		return fmt.Sprintf("%dB", size)
+	} else if size < (1024 * 1024) {
+		return fmt.Sprintf("%.1fKB", float64(size)/float64(1024))
+	} else if size < (1024 * 1024 * 1024) {
+		return fmt.Sprintf("%.1fMB", float64(size)/float64(1024*1024))
+	} else if size < (1024 * 1024 * 1024 * 1024) {
+		return fmt.Sprintf("%.1fGB", float64(size)/float64(1024*1024*1024))
+	} else {
+		return fmt.Sprintf("%.1fTB", float64(size)/float64(1024*1024*1024*1024))
+	}
 }
 
-func ReadFileList(dir string) ([]FileInfo, error) {
-	output := make([]FileInfo, 0)
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			absPath, err := filepath.Abs(path)
-			if err != nil {
-				return err
-			}
-			output = append(output, FileInfo{file: absPath, timestamp: info.ModTime()})
-		}
-		return nil
-	})
-
+func InterfaceGet(iface *net.Interface) ([]net.IP, error) {
+	addrs, err := iface.Addrs()
 	if err != nil {
 		return nil, err
 	}
-
-	return output, nil
+	ips := make([]net.IP, 0)
+	for _, v := range addrs {
+		ipone, _, err := net.ParseCIDR(v.String())
+		if err != nil {
+			continue
+		}
+		if len(ipone) > 0 {
+			ips = append(ips, ipone)
+		}
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("interface not any address.")
+	}
+	return ips, nil
 }
 
-func ReadFileHMAC(filePath string) (string, error) {
-	fd, err := os.Open(filePath)
+func InterfaceOptions() []string {
+	output := []string{"0.0.0.0", "::"}
+	ifaces, err := net.Interfaces()
 	if err != nil {
-		logs.Error("%s open fail, %s", filePath, err.Error())
-		return "", err
+		logs.Error(err.Error())
+		return output
 	}
-	defer fd.Close()
-
-	hash := sha256.New()
-	if _, err := io.Copy(hash, fd); err != nil {
-		logs.Error("%s read fail, %s", filePath, err.Error())
-		return "", err
+	for _, v := range ifaces {
+		if v.Flags&net.FlagUp == 0 {
+			continue
+		}
+		address, err := InterfaceGet(&v)
+		if err != nil {
+			continue
+		}
+		for _, addr := range address {
+			output = append(output, addr.String())
+		}
 	}
-
-	hashInBytes := hash.Sum(nil)
-	hashString := hex.EncodeToString(hashInBytes)
-
-	return hashString, nil
+	return output
 }

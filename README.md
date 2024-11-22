@@ -1,1 +1,1 @@
-# simple-http-server-windows
+# simple-http-file-server-windows

@@ -9,14 +9,39 @@ import (
 	"github.com/astaxie/beego/logs"
 )
 
+type UserInfo struct {
+	UserName string
+	Password string
+}
+
+type TlsInfo struct {
+	CA   string
+	Cert string
+	Key  string
+}
+
 type Config struct {
-	SearchDir      string `json:"SearchDir"`
-	DestinationDir string `json:"DestinationDir"`
+	TitleName    string
+	DownloadDirs []string
+	UploadDirs   []string
+	AuthEnable   bool
+	AuthUsers    []UserInfo
+	ListenAddr   string
+	ListenPort   int64
+	HttpsEnable  bool
+	HttpsInfo    TlsInfo
 }
 
 var configCache = Config{
-	SearchDir:      "",
-	DestinationDir: "",
+	TitleName:    "Simple Http File Server " + VersionGet(),
+	DownloadDirs: make([]string, 0),
+	UploadDirs:   make([]string, 0),
+	AuthEnable:   false,
+	AuthUsers:    make([]UserInfo, 0),
+	ListenAddr:   "0.0.0.0",
+	ListenPort:   9000,
+	HttpsEnable:  false,
+	HttpsInfo:    TlsInfo{},
 }
 
 var configFilePath string
@@ -38,15 +63,15 @@ func ConfigGet() *Config {
 	return &configCache
 }
 
-func SearchDirSave(path string) error {
-	configCache.SearchDir = path
-	return configSyncToFile()
-}
+// func SearchDirSave(path string) error {
+// 	configCache.SearchDir = path
+// 	return configSyncToFile()
+// }
 
-func DestinationDirDirSave(path string) error {
-	configCache.DestinationDir = path
-	return configSyncToFile()
-}
+// func DestinationDirDirSave(path string) error {
+// 	configCache.DestinationDir = path
+// 	return configSyncToFile()
+// }
 
 func ConfigInit() error {
 	configFilePath = fmt.Sprintf("%s%c%s", ConfigDirGet(), os.PathSeparator, "config.json")

@@ -33,7 +33,7 @@ func appDataDir() string {
 	if datadir == "" {
 		datadir = ".\\"
 	} else {
-		datadir = fmt.Sprintf("%s\\SimpleFileHttpServer", datadir)
+		datadir = fmt.Sprintf("%s\\SimpleHttpFileServer", datadir)
 	}
 	return datadir
 }

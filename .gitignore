@@ -23,3 +23,5 @@ go.work.sum
 
 # env file
 .env
+rice-box.go
+rsrc_windows_amd64.syso
