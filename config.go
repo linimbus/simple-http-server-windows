@@ -21,27 +21,41 @@ type TlsInfo struct {
 }
 
 type Config struct {
-	TitleName    string
-	DownloadDirs []string
-	UploadDirs   []string
-	AuthEnable   bool
-	AuthUsers    []UserInfo
-	ListenAddr   string
-	ListenPort   int64
-	HttpsEnable  bool
-	HttpsInfo    TlsInfo
+	TitleName string
+
+	DownloadDir    string
+	DownloadEnable bool
+
+	UploadDir    string
+	UploadEnable bool
+
+	AuthEnable bool
+	AuthUsers  []UserInfo
+
+	ListenAddr string
+	ListenPort int64
+
+	HttpsEnable bool
+	HttpsInfo   TlsInfo
 }
 
 var configCache = Config{
-	TitleName:    "Simple Http File Server " + VersionGet(),
-	DownloadDirs: make([]string, 0),
-	UploadDirs:   make([]string, 0),
-	AuthEnable:   false,
-	AuthUsers:    make([]UserInfo, 0),
-	ListenAddr:   "0.0.0.0",
-	ListenPort:   9000,
-	HttpsEnable:  false,
-	HttpsInfo:    TlsInfo{},
+	TitleName: "Simple Http File Server " + VersionGet(),
+
+	DownloadDir:    "",
+	DownloadEnable: true,
+
+	UploadDir:    "",
+	UploadEnable: true,
+
+	AuthEnable: false,
+	AuthUsers:  make([]UserInfo, 0),
+
+	ListenAddr: "0.0.0.0",
+	ListenPort: 9000,
+
+	HttpsEnable: false,
+	HttpsInfo:   TlsInfo{},
 }
 
 var configFilePath string
@@ -63,15 +77,50 @@ func ConfigGet() *Config {
 	return &configCache
 }
 
-// func SearchDirSave(path string) error {
-// 	configCache.SearchDir = path
-// 	return configSyncToFile()
-// }
+func UserListSave(userList []UserInfo) error {
+	configCache.AuthUsers = userList
+	return configSyncToFile()
+}
 
-// func DestinationDirDirSave(path string) error {
-// 	configCache.DestinationDir = path
-// 	return configSyncToFile()
-// }
+func UserEnableSave(flag bool) error {
+	configCache.AuthEnable = flag
+	return configSyncToFile()
+}
+
+func DownloadDirSave(dir string) error {
+	configCache.DownloadDir = dir
+	return configSyncToFile()
+}
+
+func DownloadEnableSave(flag bool) error {
+	configCache.DownloadEnable = flag
+	return configSyncToFile()
+}
+
+func UploadDirSave(dir string) error {
+	configCache.UploadDir = dir
+	return configSyncToFile()
+}
+
+func UploadEnableSave(flag bool) error {
+	configCache.UploadEnable = flag
+	return configSyncToFile()
+}
+
+func ListenAddressSave(addr string) error {
+	configCache.ListenAddr = addr
+	return configSyncToFile()
+}
+
+func HttpsEnableSave(flag bool) error {
+	configCache.HttpsEnable = flag
+	return configSyncToFile()
+}
+
+func HttpsInfoSave(info TlsInfo) error {
+	configCache.HttpsInfo = info
+	return configSyncToFile()
+}
 
 func ConfigInit() error {
 	configFilePath = fmt.Sprintf("%s%c%s", ConfigDirGet(), os.PathSeparator, "config.json")

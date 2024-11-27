@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/astaxie/beego/logs"
+	"github.com/lxn/walk"
 )
 
 func VersionGet() string {
@@ -60,7 +62,7 @@ func InterfaceGet(iface *net.Interface) ([]net.IP, error) {
 		}
 	}
 	if len(ips) == 0 {
-		return nil, fmt.Errorf("interface not any address.")
+		return nil, fmt.Errorf("interface not any address")
 	}
 	return ips, nil
 }
@@ -85,4 +87,31 @@ func InterfaceOptions() []string {
 		}
 	}
 	return output
+}
+
+func GenerateUsername(length int) string {
+	charSet := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*_+-="
+	username := make([]byte, length)
+	for i := range username {
+		index := rand.Intn(len(charSet))
+		username[i] = charSet[index]
+	}
+	return string(username)
+}
+
+func CopyClipboard() (string, error) {
+	text, err := walk.Clipboard().Text()
+	if err != nil {
+		logs.Error(err.Error())
+		return "", fmt.Errorf("can not find the any clipboard")
+	}
+	return text, nil
+}
+
+func PasteClipboard(input string) error {
+	err := walk.Clipboard().SetText(input)
+	if err != nil {
+		logs.Error(err.Error())
+	}
+	return err
 }

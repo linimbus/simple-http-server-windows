@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 
@@ -78,70 +79,67 @@ func (m *UserTable) Sort(col int, order walk.SortOrder) error {
 }
 
 var userTable *UserTable
+var tableView *walk.TableView
 
-// func DomainTableUpdate(find string) {
-// 	item := make([]*DomainItem, 0)
-// 	for idx, v := range domainList {
-// 		if strings.Index(v, find) == -1 {
-// 			continue
-// 		}
-// 		item = append(item, &DomainItem{
-// 			Index: idx, Domain: v,
-// 		})
-// 	}
-// 	domainTable.items = item
-// 	domainTable.PublishRowsReset()
-// 	domainTable.Sort(domainTable.sortColumn, domainTable.sortOrder)
-// }
+func UserTableInit(userList []UserInfo) {
+	item := make([]*UserItem, 0)
+	for i, user := range userList {
+		item = append(item, &UserItem{Index: i, UserName: user.UserName, Password: user.Password})
+	}
+	userTable.items = item
 
-// func DomainDelete(owner *walk.Dialog) error {
-// 	var deleteList []string
-// 	for _, v := range domainTable.items {
-// 		if v.checked {
-// 			deleteList = append(deleteList, v.Domain)
-// 		}
-// 	}
-// 	if len(deleteList) == 0 {
-// 		return fmt.Errorf(LangValue("nochoiceobject"))
-// 	}
+	userTable.PublishRowsReset()
+	userTable.Sort(userTable.sortColumn, userTable.sortOrder)
+}
 
-// 	var remanderList []string
-// 	for _, v := range domainList {
-// 		var exist bool
-// 		for _, v2 := range deleteList {
-// 			if v == v2 {
-// 				exist = true
-// 				break
-// 			}
-// 		}
-// 		if !exist {
-// 			remanderList = append(remanderList, v)
-// 		}
-// 	}
+func UserTableAdd(username, password string) error {
+	userTable.Lock()
+	defer userTable.Unlock()
 
-// 	domainList = remanderList
-// 	DomainSave(remanderList)
+	userList := ConfigGet().AuthUsers
 
-// 	InfoBoxAction(owner, fmt.Sprintf("%v %s", deleteList, LangValue("deletesuccess")))
+	var exist bool
+	for i, user := range userList {
+		if user.UserName == username {
+			userList[i].Password = password
+			exist = true
+		}
+	}
 
-// 	return nil
-// }
+	if !exist {
+		userList = append(userList, UserInfo{UserName: username, Password: password})
+	}
+
+	UserTableInit(userList)
+	return UserListSave(userList)
+}
+
+func UserTableDelete() error {
+	userTable.Lock()
+	defer userTable.Unlock()
+
+	userList := make([]UserInfo, 0)
+	for _, items := range userTable.items {
+		if !items.checked {
+			userList = append(userList, UserInfo{UserName: items.UserName, Password: items.Password})
+		}
+	}
+
+	if len(userList) == len(userTable.items) {
+		return fmt.Errorf("please select some user to delete")
+	}
+
+	UserTableInit(userList)
+	return UserListSave(userList)
+}
 
 func UsersAction() {
-
 	var dlg *walk.Dialog
 	var addPB, deletePB, acceptPB *walk.PushButton
 	var userLine, passwdLine *walk.LineEdit
 
 	userTable = new(UserTable)
-	userTable.items = make([]*UserItem, 0)
-
-	for _, user := range ConfigGet().AuthUsers {
-		userTable.items = append(userTable.items, &UserItem{
-			UserName: user.UserName,
-			Password: user.Password,
-		})
-	}
+	UserTableInit(ConfigGet().AuthUsers)
 
 	_, err := Dialog{
 		AssignTo:      &dlg,
@@ -154,14 +152,29 @@ func UsersAction() {
 		Layout:        VBox{},
 		Children: []Widget{
 			Composite{
-				Layout: Grid{Columns: 2, MarginsZero: true},
+				Layout: Grid{Columns: 4, MarginsZero: true},
 				Children: []Widget{
 					Label{
-						Text: "UserName: ",
+						Text: "Username: ",
 					},
 					LineEdit{
 						AssignTo: &userLine,
 						Text:     "",
+					},
+					PushButton{
+						Text: " Random Generation ",
+						OnClicked: func() {
+							userLine.SetText(GenerateUsername(10))
+						},
+					},
+					PushButton{
+						Text: " Paste Clipboard ",
+						OnClicked: func() {
+							err := PasteClipboard(userLine.Text())
+							if err != nil {
+								ErrorBoxAction(dlg, err.Error())
+							}
+						},
 					},
 					Label{
 						Text: "Password: ",
@@ -170,10 +183,28 @@ func UsersAction() {
 						AssignTo: &passwdLine,
 						Text:     "",
 					},
+					PushButton{
+						Text: " Random Generation ",
+						OnClicked: func() {
+							passwdLine.SetText(GenerateUsername(16))
+						},
+					},
+					PushButton{
+						Text: " Paste Clipboard ",
+						OnClicked: func() {
+							err := PasteClipboard(passwdLine.Text())
+							if err != nil {
+								ErrorBoxAction(dlg, err.Error())
+							}
+						},
+					},
 				},
 			},
+			Label{
+				Text: "UserList: ",
+			},
 			TableView{
-				ToolTipText:      "UserList:",
+				AssignTo:         &tableView,
 				AlternatingRowBG: true,
 				ColumnsOrderable: true,
 				CheckBoxes:       true,
@@ -190,49 +221,50 @@ func UsersAction() {
 					}
 				},
 				Model: userTable,
+				OnCurrentIndexChanged: func() {
+					index := tableView.CurrentIndex()
+					if 0 <= index && index < len(userTable.items) {
+						userLine.SetText(userTable.items[index].UserName)
+						passwdLine.SetText(userTable.items[index].Password)
+					}
+				},
 			},
 			Composite{
-				Layout: HBox{},
+				Layout: HBox{MarginsZero: true},
 				Children: []Widget{
+					HSpacer{},
 					PushButton{
 						AssignTo: &addPB,
 						Text:     "Add",
 						OnClicked: func() {
-							// 	addDomain := addLine.Text()
-							// 	if addDomain == "" {
-							// 		ErrorBoxAction(dlg, LangValue("inputdomain"))
-							// 		return
-							// 	}
-							// 	err := DomainAdd(addDomain)
-							// 	if err != nil {
-							// 		ErrorBoxAction(dlg, err.Error())
-							// 		return
-							// 	}
-
-							// 	go func() {
-							// 		InfoBoxAction(dlg, addDomain+" "+LangValue("addsuccess"))
-							// 	}()
-
-							// 	addLine.SetText("")
-							// 	findLine.SetText("")
-							// 	DomainTableUpdate("")
-							// 	RouteUpdate()
+							username := userLine.Text()
+							password := passwdLine.Text()
+							if username == "" || password == "" {
+								ErrorBoxAction(dlg, "Please input username and password!")
+								return
+							}
+							err := UserTableAdd(username, password)
+							if err != nil {
+								ErrorBoxAction(dlg, err.Error())
+								return
+							}
+							userLine.SetText("")
+							passwdLine.SetText("")
 						},
 					},
+					HSpacer{},
 					PushButton{
 						AssignTo: &deletePB,
 						Text:     "Delete",
-						// OnClicked: func() {
-						// 	err := DomainDelete(dlg)
-						// 	if err != nil {
-						// 		logs.Error(err.Error())
-						// 		ErrorBoxAction(dlg, err.Error())
-						// 	} else {
-						// 		DomainTableUpdate(findLine.Text())
-						// 		RouteUpdate()
-						// 	}
-						// },
+						OnClicked: func() {
+							err := UserTableDelete()
+							if err != nil {
+								ErrorBoxAction(dlg, err.Error())
+								return
+							}
+						},
 					},
+					HSpacer{},
 					PushButton{
 						AssignTo: &acceptPB,
 						Text:     "Cancel",
@@ -240,6 +272,7 @@ func UsersAction() {
 							dlg.Accept()
 						},
 					},
+					HSpacer{},
 				},
 			},
 		},

@@ -13,44 +13,22 @@ var mainWindowHeight = 200
 
 func MenuBarInit() []MenuItem {
 	return []MenuItem{
-		Menu{
-			Text: "Setting",
-			Items: []MenuItem{
-				Action{
-					Text: "Download Folders",
-					OnTriggered: func() {
-					},
-				},
-				Action{
-					Text: "Upload Folders",
-					OnTriggered: func() {
-					},
-				},
-				Action{
-					Text: "TLS Edit",
-					OnTriggered: func() {
-						TlsAction()
-					},
-				},
-				Action{
-					Text: "Users Edit",
-					OnTriggered: func() {
-						UsersAction()
-					},
-				},
-				Action{
-					Text: "Runlog",
-					OnTriggered: func() {
-						OpenBrowserWeb(RunlogDirGet())
-					},
-				},
-				Separator{},
-				Action{
-					Text: "Exit",
-					OnTriggered: func() {
-						CloseWindows()
-					},
-				},
+		Action{
+			Text: "Runlog",
+			OnTriggered: func() {
+				OpenBrowserWeb(RunlogDirGet())
+			},
+		},
+		Action{
+			Text: "TLS Edit",
+			OnTriggered: func() {
+				TlsAction()
+			},
+		},
+		Action{
+			Text: "Users Edit",
+			OnTriggered: func() {
+				UsersAction()
 			},
 		},
 		Action{
@@ -65,26 +43,61 @@ func MenuBarInit() []MenuItem {
 				AboutAction()
 			},
 		},
+		Action{
+			Text: "Close Windows",
+			OnTriggered: func() {
+				CloseWindows()
+			},
+		},
 	}
 }
 
 func ConsoleWidget() []Widget {
 	var listenPort *walk.NumberEdit
 	var listenAddr *walk.ComboBox
-	var tlsEnable, authEnable *walk.CheckBox
+	var httpsEnable, authEnable, downloadEnable, uploadEnable *walk.CheckBox
 	var accessURL, active *walk.PushButton
+	var titleName, downloadFolder, uploadFolder *walk.LineEdit
 
 	interfaceList := InterfaceOptions()
 
 	return []Widget{
 		Label{
-			Text: "Access URL: ",
+			Text: "Browse URL: ",
 		},
 		PushButton{
 			AssignTo: &accessURL,
 			Text:     "http://127.0.0.1:8080/",
 			OnClicked: func() {
 				OpenBrowserWeb(accessURL.Text())
+			},
+		},
+		Label{
+			Text: "Title Name: ",
+		},
+		LineEdit{
+			AssignTo: &titleName,
+			Text:     ConfigGet().TitleName,
+			OnEditingFinished: func() {
+
+			},
+		},
+		Label{
+			Text: "Download Folder: ",
+		},
+		LineEdit{
+			AssignTo: &downloadFolder,
+			OnEditingFinished: func() {
+
+			},
+		},
+		Label{
+			Text: "Upload Folder: ",
+		},
+		LineEdit{
+			AssignTo: &uploadFolder,
+			OnEditingFinished: func() {
+
 			},
 		},
 		Label{
@@ -119,19 +132,47 @@ func ConsoleWidget() []Widget {
 			Layout: HBox{MarginsZero: true},
 			Children: []Widget{
 				CheckBox{
-					AssignTo: &tlsEnable,
-					Text:     "TLS Enable",
-					Enabled:  true,
+					AssignTo: &httpsEnable,
+					Text:     "Https Enable",
+					Checked:  ConfigGet().HttpsEnable,
 					OnCheckedChanged: func() {
-
+						err := HttpsEnableSave(httpsEnable.Checked())
+						if err != nil {
+							ErrorBoxAction(mainWindow, err.Error())
+						}
 					},
 				},
 				CheckBox{
 					AssignTo: &authEnable,
 					Text:     "Auth Enable",
-					Enabled:  true,
+					Checked:  ConfigGet().AuthEnable,
 					OnCheckedChanged: func() {
-
+						err := UserEnableSave(authEnable.Checked())
+						if err != nil {
+							ErrorBoxAction(mainWindow, err.Error())
+						}
+					},
+				},
+				CheckBox{
+					AssignTo: &downloadEnable,
+					Text:     "Download Enable",
+					Checked:  ConfigGet().DownloadEnable,
+					OnCheckedChanged: func() {
+						err := DownloadEnableSave(downloadEnable.Checked())
+						if err != nil {
+							ErrorBoxAction(mainWindow, err.Error())
+						}
+					},
+				},
+				CheckBox{
+					AssignTo: &uploadEnable,
+					Text:     "Upload Enable",
+					Checked:  ConfigGet().UploadEnable,
+					OnCheckedChanged: func() {
+						err := UploadEnableSave(uploadEnable.Checked())
+						if err != nil {
+							ErrorBoxAction(mainWindow, err.Error())
+						}
 					},
 				},
 			},
