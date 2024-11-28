@@ -1,14 +1,21 @@
 package main
 
 import (
+	"fmt"
+	"os"
+	"strings"
+
+	srv "github.com/linimbus/simple-http-server-windows/server"
+
 	"github.com/astaxie/beego/logs"
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
+	"github.com/lxn/win"
 )
 
 var mainWindow *walk.MainWindow
 
-var mainWindowWidth = 450
+var mainWindowWidth = 500
 var mainWindowHeight = 200
 
 func MenuBarInit() []MenuItem {
@@ -52,13 +59,44 @@ func MenuBarInit() []MenuItem {
 	}
 }
 
-func ConsoleWidget() []Widget {
-	var listenPort *walk.NumberEdit
-	var listenAddr *walk.ComboBox
-	var httpsEnable, authEnable, downloadEnable, uploadEnable *walk.CheckBox
-	var accessURL, active *walk.PushButton
-	var titleName, downloadFolder, uploadFolder *walk.LineEdit
+var listenPort *walk.NumberEdit
+var listenAddr *walk.ComboBox
+var httpsEnable, authEnable, downloadEnable, uploadEnable *walk.CheckBox
+var accessURL, active *walk.PushButton
+var titleName, downloadFolder, uploadFolder *walk.LineEdit
 
+func BrowseURLUpdate() {
+	addr := ConfigGet().ListenAddr
+	if addr == "::" || addr == "0.0.0.0" {
+		addr = "localhost"
+	}
+	schema := "http"
+	if ConfigGet().HttpsEnable {
+		schema = "https"
+	}
+
+	if strings.Contains(addr, ":") {
+		accessURL.SetText(fmt.Sprintf("%s://[%s]:%d/", schema, addr, ConfigGet().ListenPort))
+	} else {
+		accessURL.SetText(fmt.Sprintf("%s://%s:%d/", schema, addr, ConfigGet().ListenPort))
+	}
+}
+
+func HttpServerStartup() error {
+	addr := ConfigGet().ListenAddr
+
+	listen := ""
+	if strings.Contains(addr, ":") {
+		listen = fmt.Sprintf("[%s]:%d", addr, ConfigGet().ListenPort)
+	} else {
+		listen = fmt.Sprintf("%s:%d", addr, ConfigGet().ListenPort)
+	}
+
+	err := srv.HttpServer(listen, srv.Routes{}, "", "")
+	return err
+}
+
+func ConsoleWidget() []Widget {
 	interfaceList := InterfaceOptions()
 
 	return []Widget{
@@ -67,9 +105,12 @@ func ConsoleWidget() []Widget {
 		},
 		PushButton{
 			AssignTo: &accessURL,
-			Text:     "http://127.0.0.1:8080/",
+			Text:     "",
 			OnClicked: func() {
 				OpenBrowserWeb(accessURL.Text())
+			},
+			OnBoundsChanged: func() {
+				BrowseURLUpdate()
 			},
 		},
 		Label{
@@ -79,40 +120,146 @@ func ConsoleWidget() []Widget {
 			AssignTo: &titleName,
 			Text:     ConfigGet().TitleName,
 			OnEditingFinished: func() {
-
+				err := TitleNameSave(titleName.Text())
+				if err != nil {
+					ErrorBoxAction(mainWindow, err.Error())
+				}
 			},
 		},
 		Label{
 			Text: "Download Folder: ",
 		},
-		LineEdit{
-			AssignTo: &downloadFolder,
-			OnEditingFinished: func() {
+		Composite{
+			Layout: HBox{MarginsZero: true},
+			Children: []Widget{
+				LineEdit{
+					AssignTo: &downloadFolder,
+					Text:     ConfigGet().DownloadDir,
+					OnEditingFinished: func() {
+						dir := downloadFolder.Text()
+						if dir != "" {
+							stat, err := os.Stat(dir)
+							if err != nil {
+								ErrorBoxAction(mainWindow, "The download folder is not exist")
+								downloadFolder.SetText(ConfigGet().DownloadDir)
+								return
+							}
+							if !stat.IsDir() {
+								ErrorBoxAction(mainWindow, "The download folder is not directory")
+								downloadFolder.SetText(ConfigGet().DownloadDir)
+								return
+							}
+							return
+						}
+						DownloadDirSave(dir)
+					},
+				},
+				PushButton{
+					MaxSize: Size{Width: 30},
+					Text:    " ... ",
+					OnClicked: func() {
+						dlgDir := new(walk.FileDialog)
+						dlgDir.FilePath = ConfigGet().DownloadDir
+						dlgDir.Flags = win.OFN_EXPLORER
+						dlgDir.Title = "Please select a folder as download file directory"
 
+						exist, err := dlgDir.ShowBrowseFolder(mainWindow)
+						if err != nil {
+							logs.Error(err.Error())
+							return
+						}
+						if exist {
+							logs.Info("select %s as download file directory", dlgDir.FilePath)
+							downloadFolder.SetText(dlgDir.FilePath)
+							DownloadDirSave(dlgDir.FilePath)
+						}
+					},
+				},
 			},
 		},
 		Label{
 			Text: "Upload Folder: ",
 		},
-		LineEdit{
-			AssignTo: &uploadFolder,
-			OnEditingFinished: func() {
+		Composite{
+			Layout: HBox{MarginsZero: true},
+			Children: []Widget{
+				LineEdit{
+					AssignTo: &uploadFolder,
+					Text:     ConfigGet().UploadDir,
+					OnEditingFinished: func() {
+						dir := uploadFolder.Text()
+						if dir != "" {
+							stat, err := os.Stat(dir)
+							if err != nil {
+								ErrorBoxAction(mainWindow, "The upload folder is not exist")
+								uploadFolder.SetText(ConfigGet().UploadDir)
+								return
+							}
+							if !stat.IsDir() {
+								ErrorBoxAction(mainWindow, "The upload folder is not directory")
+								uploadFolder.SetText(ConfigGet().UploadDir)
+								return
+							}
+							return
+						}
+						UploadDirSave(dir)
+					},
+				},
+				PushButton{
+					MaxSize: Size{Width: 30},
+					Text:    " ... ",
+					OnClicked: func() {
+						dlgDir := new(walk.FileDialog)
+						dlgDir.FilePath = ConfigGet().UploadDir
+						dlgDir.Flags = win.OFN_EXPLORER
+						dlgDir.Title = "Please select a folder as upload file directory"
 
+						exist, err := dlgDir.ShowBrowseFolder(mainWindow)
+						if err != nil {
+							logs.Error(err.Error())
+							return
+						}
+						if exist {
+							logs.Info("select %s as upload file directory", dlgDir.FilePath)
+							uploadFolder.SetText(dlgDir.FilePath)
+							UploadDirSave(dlgDir.FilePath)
+						}
+					},
+				},
 			},
 		},
 		Label{
 			Text: "Listen Address: ",
 		},
 		ComboBox{
-			AssignTo:           &listenAddr,
-			RightToLeftReading: true,
-			CurrentIndex:       0,
-			Model:              interfaceList,
+			AssignTo: &listenAddr,
+			CurrentIndex: func() int {
+				addr := ConfigGet().ListenAddr
+				for i, item := range interfaceList {
+					if addr == item {
+						return i
+					}
+				}
+				return 0
+			},
+			Model: interfaceList,
 			OnCurrentIndexChanged: func() {
-				// ListenAddressSave(consoleIface.Text())
+				err := ListenAddressSave(listenAddr.Text())
+				if err != nil {
+					ErrorBoxAction(mainWindow, err.Error())
+				} else {
+					BrowseURLUpdate()
+				}
 			},
 			OnBoundsChanged: func() {
-				// consoleIface.SetCurrentIndex(ConsoleIndex())
+				addr := ConfigGet().ListenAddr
+				for i, item := range interfaceList {
+					if addr == item {
+						listenAddr.SetCurrentIndex(i)
+						return
+					}
+				}
+				listenAddr.SetCurrentIndex(0)
 			},
 		},
 		Label{
@@ -125,11 +272,17 @@ func ConsoleWidget() []Widget {
 			MaxValue:    65535,
 			MinValue:    1,
 			OnValueChanged: func() {
+				err := ListenPortSave(int64(listenPort.Value()))
+				if err != nil {
+					ErrorBoxAction(mainWindow, err.Error())
+				} else {
+					BrowseURLUpdate()
+				}
 			},
 		},
 		VSpacer{},
 		Composite{
-			Layout: HBox{MarginsZero: true},
+			Layout: HBox{Margins: Margins{Top: 0, Bottom: 0, Left: 5, Right: 5}},
 			Children: []Widget{
 				CheckBox{
 					AssignTo: &httpsEnable,
@@ -139,6 +292,8 @@ func ConsoleWidget() []Widget {
 						err := HttpsEnableSave(httpsEnable.Checked())
 						if err != nil {
 							ErrorBoxAction(mainWindow, err.Error())
+						} else {
+							BrowseURLUpdate()
 						}
 					},
 				},
@@ -185,11 +340,16 @@ func ConsoleWidget() []Widget {
 			ToolTipText: "Startup or Stop",
 			MinSize:     Size{Height: 48, Width: 48},
 			OnClicked: func() {
-				if ServerEnable() {
-					active.SetImage(ICON_Stop)
-				} else {
-					active.SetImage(ICON_Start)
-				}
+
+				active.SetImage(ICON_Stop)
+
+				go func() {
+					err := HttpServerStartup()
+					if err != nil {
+						ErrorBoxAction(mainWindow, err.Error())
+					}
+				}()
+
 			},
 		},
 	}

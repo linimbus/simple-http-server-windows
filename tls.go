@@ -55,6 +55,7 @@ func TlsAction() {
 			Composite{
 				Layout: HBox{},
 				Children: []Widget{
+					HSpacer{},
 					PushButton{
 						AssignTo: &acceptPB,
 						Text:     "OK",
@@ -62,6 +63,7 @@ func TlsAction() {
 							dlg.Accept()
 						},
 					},
+					HSpacer{},
 					PushButton{
 						AssignTo: &cancelPB,
 						Text:     "Cancel",
@@ -69,6 +71,7 @@ func TlsAction() {
 							dlg.Cancel()
 						},
 					},
+					HSpacer{},
 				},
 			},
 		},

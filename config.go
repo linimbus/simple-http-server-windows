@@ -112,6 +112,11 @@ func ListenAddressSave(addr string) error {
 	return configSyncToFile()
 }
 
+func ListenPortSave(port int64) error {
+	configCache.ListenPort = port
+	return configSyncToFile()
+}
+
 func HttpsEnableSave(flag bool) error {
 	configCache.HttpsEnable = flag
 	return configSyncToFile()
@@ -119,6 +124,11 @@ func HttpsEnableSave(flag bool) error {
 
 func HttpsInfoSave(info TlsInfo) error {
 	configCache.HttpsInfo = info
+	return configSyncToFile()
+}
+
+func TitleNameSave(name string) error {
+	configCache.TitleName = name
 	return configSyncToFile()
 }
 
