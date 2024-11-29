@@ -4,8 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
-
-	srv "github.com/linimbus/simple-http-server-windows/server"
+	"sync"
 
 	"github.com/astaxie/beego/logs"
 	"github.com/lxn/walk"
@@ -61,9 +60,11 @@ func MenuBarInit() []MenuItem {
 
 var listenPort *walk.NumberEdit
 var listenAddr *walk.ComboBox
-var httpsEnable, authEnable, downloadEnable, uploadEnable *walk.CheckBox
+var httpsEnable, authEnable, deleteEnable, uploadEnable *walk.CheckBox
 var accessURL, active *walk.PushButton
-var titleName, downloadFolder, uploadFolder *walk.LineEdit
+var serverFolder *walk.LineEdit
+var serverInstance *fileHandler
+var mutex sync.Mutex
 
 func BrowseURLUpdate() {
 	addr := ConfigGet().ListenAddr
@@ -82,18 +83,64 @@ func BrowseURLUpdate() {
 	}
 }
 
-func HttpServerStartup() error {
-	addr := ConfigGet().ListenAddr
+func ServerRunning() bool {
+	return serverInstance != nil
+}
 
-	listen := ""
+func ServerStart() error {
+	addr := ConfigGet().ListenAddr
+	var listenAddr string
 	if strings.Contains(addr, ":") {
-		listen = fmt.Sprintf("[%s]:%d", addr, ConfigGet().ListenPort)
+		listenAddr = fmt.Sprintf("[%s]:%d", addr, ConfigGet().ListenPort)
 	} else {
-		listen = fmt.Sprintf("%s:%d", addr, ConfigGet().ListenPort)
+		listenAddr = fmt.Sprintf("%s:%d", addr, ConfigGet().ListenPort)
+	}
+	var err error
+	serverInstance, err = CreateHttpServer(listenAddr,
+		ConfigGet().ServerDir,
+		ConfigGet().UploadEnable,
+		ConfigGet().DeleteEnable,
+		ConfigGet().HttpsEnable,
+		ConfigGet().HttpsInfo.Cert,
+		ConfigGet().HttpsInfo.Key)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func ServerShutdown() error {
+	err := serverInstance.Shutdown()
+	if err != nil {
+		return err
+	}
+	serverInstance = nil
+	return nil
+}
+
+func ServerSwitch() {
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	var err error
+	if ServerRunning() {
+		err = ServerShutdown()
+	} else {
+		err = ServerStart()
 	}
 
-	err := srv.HttpServer(listen, srv.Routes{}, "", "")
-	return err
+	if err != nil {
+		ErrorBoxAction(mainWindow, err.Error())
+	}
+
+	if ServerRunning() {
+		accessURL.SetEnabled(true)
+		active.SetImage(ICON_Stop)
+	} else {
+		accessURL.SetEnabled(false)
+		active.SetImage(ICON_Start)
+	}
+	active.SetEnabled(true)
 }
 
 func ConsoleWidget() []Widget {
@@ -106,6 +153,7 @@ func ConsoleWidget() []Widget {
 		PushButton{
 			AssignTo: &accessURL,
 			Text:     "",
+			Enabled:  false,
 			OnClicked: func() {
 				OpenBrowserWeb(accessURL.Text())
 			},
@@ -114,44 +162,31 @@ func ConsoleWidget() []Widget {
 			},
 		},
 		Label{
-			Text: "Title Name: ",
-		},
-		LineEdit{
-			AssignTo: &titleName,
-			Text:     ConfigGet().TitleName,
-			OnEditingFinished: func() {
-				err := TitleNameSave(titleName.Text())
-				if err != nil {
-					ErrorBoxAction(mainWindow, err.Error())
-				}
-			},
-		},
-		Label{
-			Text: "Download Folder: ",
+			Text: "Server Folder: ",
 		},
 		Composite{
 			Layout: HBox{MarginsZero: true},
 			Children: []Widget{
 				LineEdit{
-					AssignTo: &downloadFolder,
-					Text:     ConfigGet().DownloadDir,
+					AssignTo: &serverFolder,
+					Text:     ConfigGet().ServerDir,
 					OnEditingFinished: func() {
-						dir := downloadFolder.Text()
+						dir := serverFolder.Text()
 						if dir != "" {
 							stat, err := os.Stat(dir)
 							if err != nil {
-								ErrorBoxAction(mainWindow, "The download folder is not exist")
-								downloadFolder.SetText(ConfigGet().DownloadDir)
+								ErrorBoxAction(mainWindow, "The server folder is not exist")
+								serverFolder.SetText(ConfigGet().ServerDir)
 								return
 							}
 							if !stat.IsDir() {
-								ErrorBoxAction(mainWindow, "The download folder is not directory")
-								downloadFolder.SetText(ConfigGet().DownloadDir)
+								ErrorBoxAction(mainWindow, "The server folder is not directory")
+								serverFolder.SetText(ConfigGet().ServerDir)
 								return
 							}
 							return
 						}
-						DownloadDirSave(dir)
+						ServerDirSave(dir)
 					},
 				},
 				PushButton{
@@ -159,9 +194,9 @@ func ConsoleWidget() []Widget {
 					Text:    " ... ",
 					OnClicked: func() {
 						dlgDir := new(walk.FileDialog)
-						dlgDir.FilePath = ConfigGet().DownloadDir
+						dlgDir.FilePath = ConfigGet().ServerDir
 						dlgDir.Flags = win.OFN_EXPLORER
-						dlgDir.Title = "Please select a folder as download file directory"
+						dlgDir.Title = "Please select a folder as server file directory"
 
 						exist, err := dlgDir.ShowBrowseFolder(mainWindow)
 						if err != nil {
@@ -169,60 +204,9 @@ func ConsoleWidget() []Widget {
 							return
 						}
 						if exist {
-							logs.Info("select %s as download file directory", dlgDir.FilePath)
-							downloadFolder.SetText(dlgDir.FilePath)
-							DownloadDirSave(dlgDir.FilePath)
-						}
-					},
-				},
-			},
-		},
-		Label{
-			Text: "Upload Folder: ",
-		},
-		Composite{
-			Layout: HBox{MarginsZero: true},
-			Children: []Widget{
-				LineEdit{
-					AssignTo: &uploadFolder,
-					Text:     ConfigGet().UploadDir,
-					OnEditingFinished: func() {
-						dir := uploadFolder.Text()
-						if dir != "" {
-							stat, err := os.Stat(dir)
-							if err != nil {
-								ErrorBoxAction(mainWindow, "The upload folder is not exist")
-								uploadFolder.SetText(ConfigGet().UploadDir)
-								return
-							}
-							if !stat.IsDir() {
-								ErrorBoxAction(mainWindow, "The upload folder is not directory")
-								uploadFolder.SetText(ConfigGet().UploadDir)
-								return
-							}
-							return
-						}
-						UploadDirSave(dir)
-					},
-				},
-				PushButton{
-					MaxSize: Size{Width: 30},
-					Text:    " ... ",
-					OnClicked: func() {
-						dlgDir := new(walk.FileDialog)
-						dlgDir.FilePath = ConfigGet().UploadDir
-						dlgDir.Flags = win.OFN_EXPLORER
-						dlgDir.Title = "Please select a folder as upload file directory"
-
-						exist, err := dlgDir.ShowBrowseFolder(mainWindow)
-						if err != nil {
-							logs.Error(err.Error())
-							return
-						}
-						if exist {
-							logs.Info("select %s as upload file directory", dlgDir.FilePath)
-							uploadFolder.SetText(dlgDir.FilePath)
-							UploadDirSave(dlgDir.FilePath)
+							logs.Info("select %s as server file directory", dlgDir.FilePath)
+							serverFolder.SetText(dlgDir.FilePath)
+							ServerDirSave(dlgDir.FilePath)
 						}
 					},
 				},
@@ -287,6 +271,7 @@ func ConsoleWidget() []Widget {
 				CheckBox{
 					AssignTo: &httpsEnable,
 					Text:     "Https Enable",
+					Enabled:  false,
 					Checked:  ConfigGet().HttpsEnable,
 					OnCheckedChanged: func() {
 						err := HttpsEnableSave(httpsEnable.Checked())
@@ -300,6 +285,7 @@ func ConsoleWidget() []Widget {
 				CheckBox{
 					AssignTo: &authEnable,
 					Text:     "Auth Enable",
+					Enabled:  false,
 					Checked:  ConfigGet().AuthEnable,
 					OnCheckedChanged: func() {
 						err := UserEnableSave(authEnable.Checked())
@@ -309,11 +295,11 @@ func ConsoleWidget() []Widget {
 					},
 				},
 				CheckBox{
-					AssignTo: &downloadEnable,
-					Text:     "Download Enable",
-					Checked:  ConfigGet().DownloadEnable,
+					AssignTo: &deleteEnable,
+					Text:     "Delete Enable",
+					Checked:  ConfigGet().DeleteEnable,
 					OnCheckedChanged: func() {
-						err := DownloadEnableSave(downloadEnable.Checked())
+						err := DeleteEnableSave(deleteEnable.Checked())
 						if err != nil {
 							ErrorBoxAction(mainWindow, err.Error())
 						}
@@ -340,16 +326,8 @@ func ConsoleWidget() []Widget {
 			ToolTipText: "Startup or Stop",
 			MinSize:     Size{Height: 48, Width: 48},
 			OnClicked: func() {
-
-				active.SetImage(ICON_Stop)
-
-				go func() {
-					err := HttpServerStartup()
-					if err != nil {
-						ErrorBoxAction(mainWindow, err.Error())
-					}
-				}()
-
+				active.SetEnabled(false)
+				go ServerSwitch()
 			},
 		},
 	}
@@ -389,6 +367,12 @@ func mainWindows() {
 }
 
 func CloseWindows() {
+	mutex.Lock()
+	if ServerRunning() {
+		ServerShutdown()
+	}
+	mutex.Unlock()
+
 	if mainWindow != nil {
 		mainWindow.Close()
 		mainWindow = nil

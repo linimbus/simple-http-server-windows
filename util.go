@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"math/rand"
 	"net"
@@ -114,4 +115,17 @@ func PasteClipboard(input string) error {
 		logs.Error(err.Error())
 	}
 	return err
+}
+
+func CreateTlsConfig(cert, key string) (*tls.Config, error) {
+	certs, err := tls.X509KeyPair([]byte(cert), []byte(key))
+	if err != nil {
+		return nil, err
+	}
+	return &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		MaxVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{certs},
+		ClientAuth:   tls.RequestClientCert,
+	}, nil
 }

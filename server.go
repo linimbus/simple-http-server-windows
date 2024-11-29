@@ -1,10 +1,13 @@
-package server
+package main
 
 import (
+	"context"
+	"crypto/tls"
 	"fmt"
 	"html/template"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -12,15 +15,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/astaxie/beego/logs"
 )
 
 const (
-	tarGzKey         = "tar.gz"
-	tarGzValue       = "true"
-	tarGzContentType = "application/x-tar+gzip"
-
 	zipKey         = "zip"
 	zipValue       = "true"
 	zipContentType = "application/zip"
@@ -45,7 +47,6 @@ const directoryListingTemplateText = `
 	</thead>
 	<tbody>
 	{{- if .Files }}
-	<tr><td colspan=3><a href="{{ .TarGzURL }}">.tar.gz of all files</a></td></tr>
 	<tr><td colspan=3><a href="{{ .ZipURL }}">.zip of all files</a></td></tr>
 	{{- end }}
 	{{- range .Files }}
@@ -104,21 +105,30 @@ type directoryListingFileData struct {
 type directoryListingData struct {
 	Title       string
 	ZipURL      *url.URL
-	TarGzURL    *url.URL
 	Files       []directoryListingFileData
 	AllowUpload bool
 }
+
+var (
+	directoryListingTemplate = template.Must(template.New("").Parse(directoryListingTemplateText))
+)
 
 type fileHandler struct {
 	route       string
 	path        string
 	allowUpload bool
 	allowDelete bool
-}
 
-var (
-	directoryListingTemplate = template.Must(template.New("").Parse(directoryListingTemplateText))
-)
+	timeout int
+	address string
+	server  *http.Server
+
+	flowbytes int64
+	requests  int64
+	sessions  int64
+
+	sync.WaitGroup
+}
 
 func (f *fileHandler) serveStatus(w http.ResponseWriter, r *http.Request, status int) error {
 	w.WriteHeader(status)
@@ -129,18 +139,11 @@ func (f *fileHandler) serveStatus(w http.ResponseWriter, r *http.Request, status
 	return nil
 }
 
-func (f *fileHandler) serveTarGz(w http.ResponseWriter, r *http.Request, path string) error {
-	w.Header().Set("Content-Type", tarGzContentType)
-	name := filepath.Base(path) + ".tar.gz"
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, name))
-	return tarGz(w, path)
-}
-
 func (f *fileHandler) serveZip(w http.ResponseWriter, r *http.Request, osPath string) error {
 	w.Header().Set("Content-Type", zipContentType)
 	name := filepath.Base(osPath) + ".zip"
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, name))
-	return zip(w, osPath)
+	return FileZip(w, osPath)
 }
 
 func (f *fileHandler) serveDir(w http.ResponseWriter, r *http.Request, osPath string) error {
@@ -158,14 +161,8 @@ func (f *fileHandler) serveDir(w http.ResponseWriter, r *http.Request, osPath st
 		AllowUpload: f.allowUpload,
 		Title: func() string {
 			relPath, _ := filepath.Rel(f.path, osPath)
-			return filepath.Join(filepath.Base(f.path), relPath)
-		}(),
-		TarGzURL: func() *url.URL {
-			url := *r.URL
-			q := url.Query()
-			q.Set(tarGzKey, tarGzValue)
-			url.RawQuery = q.Encode()
-			return &url
+			urlPath := filepath.Join(filepath.Base(f.path), relPath)
+			return strings.ReplaceAll(urlPath, osPathSeparator, "/")
 		}(),
 		ZipURL: func() *url.URL {
 			url := *r.URL
@@ -178,7 +175,7 @@ func (f *fileHandler) serveDir(w http.ResponseWriter, r *http.Request, osPath st
 			for _, d := range files {
 				name := d.Name()
 				if d.IsDir() {
-					name += osPathSeparator
+					name += "/"
 				}
 				fileData := directoryListingFileData{
 					Name:  name,
@@ -213,7 +210,7 @@ func (f *fileHandler) serveUploadTo(w http.ResponseWriter, r *http.Request, osPa
 		return err
 	}
 	outPath := filepath.Join(osPath, filepath.Base(h.Filename))
-	out, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY, 0600)
+	out, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
@@ -229,7 +226,9 @@ func (f *fileHandler) serveUploadTo(w http.ResponseWriter, r *http.Request, osPa
 
 // ServeHTTP is http.Handler.ServeHTTP
 func (f *fileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	logs.Info("[%s] %s %s %s", f.path, r.RemoteAddr, r.Method, r.URL.String())
+	logs.Info("http server request [%s] %s %s %s", f.path, r.RemoteAddr, r.Method, r.URL.String())
+
+	atomic.AddInt64(&f.requests, 1)
 
 	urlPath := r.URL.Path
 	if !strings.HasPrefix(urlPath, "/") {
@@ -241,6 +240,7 @@ func (f *fileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	osPath := strings.ReplaceAll(urlPath, "/", osPathSeparator)
 	osPath = filepath.Clean(osPath)
 	osPath = filepath.Join(f.path, osPath)
+
 	info, err := os.Stat(osPath)
 	switch {
 	case os.IsNotExist(err):
@@ -255,11 +255,6 @@ func (f *fileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = f.serveStatus(w, r, http.StatusForbidden)
 	case r.URL.Query().Get(zipKey) != "":
 		err := f.serveZip(w, r, osPath)
-		if err != nil {
-			_ = f.serveStatus(w, r, http.StatusInternalServerError)
-		}
-	case r.URL.Query().Get(tarGzKey) != "":
-		err := f.serveTarGz(w, r, osPath)
 		if err != nil {
 			_ = f.serveStatus(w, r, http.StatusInternalServerError)
 		}
@@ -282,3 +277,85 @@ func (f *fileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, osPath)
 	}
 }
+
+func (f *fileHandler) Shutdown() error {
+	context, cencel := context.WithTimeout(context.Background(), time.Duration(5)*time.Second)
+	err := f.server.Shutdown(context)
+	cencel()
+	if err != nil {
+		logs.Error("http file server ready to shut down fail, %s", err.Error())
+	}
+	f.Wait()
+	return err
+}
+
+func CreateHttpServer(addr, folder string,
+	upload, delete bool,
+	https bool, cert, key string) (*fileHandler, error) {
+
+	listen, err := net.Listen("tcp", addr)
+	if err != nil {
+		logs.Error("http file server listen %s address fail", addr)
+		return nil, err
+	}
+	logs.Info("http file server listening on %s", addr)
+
+	var tlsConfig *tls.Config
+	if https {
+		tlsConfig, err = CreateTlsConfig(cert, key)
+		if err != nil {
+			logs.Error("create tls config for http server fail, %s", err.Error())
+			return nil, err
+		}
+		listen = tls.NewListener(listen, tlsConfig)
+	}
+
+	fileHandler := &fileHandler{
+		route:       "/",
+		path:        folder,
+		allowUpload: upload,
+		allowDelete: delete,
+	}
+
+	httpserver := &http.Server{
+		Handler:      fileHandler,
+		ReadTimeout:  time.Duration(60) * time.Second,
+		WriteTimeout: time.Duration(60) * time.Second,
+		TLSConfig:    tlsConfig,
+	}
+
+	fileHandler.server = httpserver
+	fileHandler.Add(1)
+
+	go func() {
+		defer fileHandler.Done()
+		err = httpserver.Serve(listen)
+		if err != nil {
+			logs.Error("http server attach listen instance fail, %s", err.Error())
+		}
+	}()
+
+	return fileHandler, nil
+}
+
+// func HttpServer(addr string, folder string, cert, key string) error {
+
+// 	mux := http.DefaultServeMux
+
+// 	fileHandler := &fileHandler{
+// 		route:       "/",
+// 		path:        folder,
+// 		allowUpload: true,
+// 		allowDelete: true,
+// 	}
+
+// 	mux.Handle("/", fileHandler)
+
+// 	logs.Info("http file server listening on %s", addr)
+
+// 	if cert != "" && key != "" {
+// 		return http.ListenAndServeTLS(addr, cert, key, mux)
+// 	}
+
+// 	return http.ListenAndServe(addr, mux)
+// }

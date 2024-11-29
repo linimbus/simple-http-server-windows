@@ -21,12 +21,9 @@ type TlsInfo struct {
 }
 
 type Config struct {
-	TitleName string
+	ServerDir string
 
-	DownloadDir    string
-	DownloadEnable bool
-
-	UploadDir    string
+	DeleteEnable bool
 	UploadEnable bool
 
 	AuthEnable bool
@@ -40,12 +37,8 @@ type Config struct {
 }
 
 var configCache = Config{
-	TitleName: "Simple Http File Server " + VersionGet(),
-
-	DownloadDir:    "",
-	DownloadEnable: true,
-
-	UploadDir:    "",
+	ServerDir:    "",
+	DeleteEnable: true,
 	UploadEnable: true,
 
 	AuthEnable: false,
@@ -87,18 +80,13 @@ func UserEnableSave(flag bool) error {
 	return configSyncToFile()
 }
 
-func DownloadDirSave(dir string) error {
-	configCache.DownloadDir = dir
+func ServerDirSave(dir string) error {
+	configCache.ServerDir = dir
 	return configSyncToFile()
 }
 
-func DownloadEnableSave(flag bool) error {
-	configCache.DownloadEnable = flag
-	return configSyncToFile()
-}
-
-func UploadDirSave(dir string) error {
-	configCache.UploadDir = dir
+func DeleteEnableSave(flag bool) error {
+	configCache.DeleteEnable = flag
 	return configSyncToFile()
 }
 
@@ -124,11 +112,6 @@ func HttpsEnableSave(flag bool) error {
 
 func HttpsInfoSave(info TlsInfo) error {
 	configCache.HttpsInfo = info
-	return configSyncToFile()
-}
-
-func TitleNameSave(name string) error {
-	configCache.TitleName = name
 	return configSyncToFile()
 }
 
