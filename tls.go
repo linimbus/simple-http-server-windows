@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/astaxie/beego/logs"
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
@@ -30,25 +32,26 @@ func TlsAction() {
 					TextEdit{
 						AssignTo: &tlsCA,
 						MinSize:  Size{Height: 100},
-
-						Text: "",
+						Text:     ConfigGet().HttpsInfo.CA,
+						VScroll:  true,
 					},
 					Label{
-						Text: "TLS Cert: ",
+						Text: "TLS Cert*: ",
 					},
 					TextEdit{
 						AssignTo: &tlsCert,
 						MinSize:  Size{Height: 100},
-
-						Text: "",
+						Text:     ConfigGet().HttpsInfo.Cert,
+						VScroll:  true,
 					},
 					Label{
-						Text: "TLS Key: ",
+						Text: "TLS Key*: ",
 					},
 					TextEdit{
 						AssignTo: &tlsKey,
 						MinSize:  Size{Height: 100},
-						Text:     "",
+						Text:     ConfigGet().HttpsInfo.Key,
+						VScroll:  true,
 					},
 				},
 			},
@@ -60,6 +63,24 @@ func TlsAction() {
 						AssignTo: &acceptPB,
 						Text:     "OK",
 						OnClicked: func() {
+							if tlsCert.Text() != "" || tlsKey.Text() != "" {
+								_, err := CreateTlsConfig(tlsCert.Text(), tlsKey.Text())
+								if err != nil {
+									ErrorBoxAction(mainWindow, fmt.Sprintf("TLS Cert or Key maybe invalid! %s", err.Error()))
+									return
+								}
+							}
+
+							err := HttpsInfoSave(TlsInfo{
+								CA:   tlsCA.Text(),
+								Cert: tlsCert.Text(),
+								Key:  tlsKey.Text(),
+							})
+							if err != nil {
+								ErrorBoxAction(mainWindow, err.Error())
+								return
+							}
+
 							dlg.Accept()
 						},
 					},

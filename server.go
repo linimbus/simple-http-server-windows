@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"io"
@@ -46,7 +47,7 @@ const directoryListingTemplateText = `
 		<th colspan=2 class=number>Size (bytes)</th>
 	</thead>
 	<tbody>
-	{{- if .Files }}
+	{{- if and .Files .AllowZip }}
 	<tr><td colspan=3><a href="{{ .ZipURL }}">.zip of all files</a></td></tr>
 	{{- end }}
 	{{- range .Files }}
@@ -107,6 +108,7 @@ type directoryListingData struct {
 	ZipURL      *url.URL
 	Files       []directoryListingFileData
 	AllowUpload bool
+	AllowZip    bool
 }
 
 var (
@@ -114,10 +116,15 @@ var (
 )
 
 type fileHandler struct {
-	route       string
-	path        string
+	route string
+	path  string
+
+	allowZip    bool
 	allowUpload bool
 	allowDelete bool
+	allowAuth   bool
+
+	userList []UserInfo
 
 	timeout int
 	address string
@@ -159,6 +166,7 @@ func (f *fileHandler) serveDir(w http.ResponseWriter, r *http.Request, osPath st
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	return directoryListingTemplate.Execute(w, directoryListingData{
 		AllowUpload: f.allowUpload,
+		AllowZip:    f.allowZip,
 		Title: func() string {
 			relPath, _ := filepath.Rel(f.path, osPath)
 			urlPath := filepath.Join(filepath.Base(f.path), relPath)
@@ -224,11 +232,55 @@ func (f *fileHandler) serveUploadTo(w http.ResponseWriter, r *http.Request, osPa
 	return nil
 }
 
+func (f *fileHandler) AuthHandler(w http.ResponseWriter, r *http.Request) bool {
+	if !f.allowAuth {
+		return true
+	}
+
+	auth := r.Header.Get("Authorization")
+	if auth == "" {
+		w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+		http.Error(w, "Authentication failed, missing username and password!", http.StatusUnauthorized)
+		return false
+	}
+
+	authInfo, err := base64.StdEncoding.DecodeString(auth[6:])
+	if err != nil {
+		http.Error(w, "Authentication failed, missing username and password!", http.StatusUnauthorized)
+		return false
+	}
+
+	var authPass bool
+	var authUser UserInfo
+
+	userList := f.userList
+	for _, user := range userList {
+		if string(authInfo) == fmt.Sprintf("%s:%s", user.UserName, user.Password) {
+			authPass = true
+			authUser = user
+			break
+		}
+	}
+
+	if !authPass {
+		http.Error(w, "Authentication failed, user or password error!", http.StatusUnauthorized)
+		return false
+	}
+
+	logs.Info("http server [%s] auth passed", authUser.UserName)
+	return true
+}
+
 // ServeHTTP is http.Handler.ServeHTTP
 func (f *fileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logs.Info("http server request [%s] %s %s %s", f.path, r.RemoteAddr, r.Method, r.URL.String())
 
 	atomic.AddInt64(&f.requests, 1)
+	StatusRequestUpdate(f.requests)
+
+	if !f.AuthHandler(w, r) {
+		return
+	}
 
 	urlPath := r.URL.Path
 	if !strings.HasPrefix(urlPath, "/") {
@@ -253,7 +305,7 @@ func (f *fileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = f.serveStatus(w, r, http.StatusForbidden)
 	case !f.allowUpload && r.Method == http.MethodPost:
 		_ = f.serveStatus(w, r, http.StatusForbidden)
-	case r.URL.Query().Get(zipKey) != "":
+	case f.allowZip && r.URL.Query().Get(zipKey) != "":
 		err := f.serveZip(w, r, osPath)
 		if err != nil {
 			_ = f.serveStatus(w, r, http.StatusInternalServerError)
@@ -279,31 +331,53 @@ func (f *fileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fileHandler) Shutdown() error {
-	context, cencel := context.WithTimeout(context.Background(), time.Duration(5)*time.Second)
+	context, cencel := context.WithTimeout(context.Background(), 5*time.Second)
 	err := f.server.Shutdown(context)
 	cencel()
 	if err != nil {
 		logs.Error("http file server ready to shut down fail, %s", err.Error())
 	}
 	f.Wait()
-	return err
+	return nil
 }
 
-func CreateHttpServer(addr, folder string,
-	upload, delete bool,
-	https bool, cert, key string) (*fileHandler, error) {
+func CreateHttpServer(cfg *Config) (*fileHandler, error) {
 
-	listen, err := net.Listen("tcp", addr)
+	stat, err := os.Stat(cfg.ServerDir)
 	if err != nil {
-		logs.Error("http file server listen %s address fail", addr)
+		logs.Error("open server dir %s failed, %s", cfg.ServerDir, err.Error())
 		return nil, err
 	}
-	logs.Info("http file server listening on %s", addr)
+
+	if !stat.IsDir() {
+		return nil, fmt.Errorf("server dir %s is not folder", cfg.ServerDir)
+	}
+
+	var address string
+	if strings.Contains(cfg.ListenAddr, ":") {
+		address = fmt.Sprintf("[%s]:%d", cfg.ListenAddr, cfg.ListenPort)
+	} else {
+		address = fmt.Sprintf("%s:%d", cfg.ListenAddr, cfg.ListenPort)
+	}
+
+	listen, err := net.Listen("tcp", address)
+	if err != nil {
+		logs.Error("http file server listen %s address fail", address)
+		return nil, err
+	}
+
+	logs.Info("http file server listening on %s", address)
 
 	var tlsConfig *tls.Config
-	if https {
-		tlsConfig, err = CreateTlsConfig(cert, key)
+	if cfg.HttpsEnable {
+		if cfg.HttpsInfo.Cert == "" || cfg.HttpsInfo.Key == "" {
+			listen.Close()
+			return nil, fmt.Errorf("please configure the certificate and key on the tls edit page")
+		}
+
+		tlsConfig, err = CreateTlsConfig(cfg.HttpsInfo.Cert, cfg.HttpsInfo.Key)
 		if err != nil {
+			listen.Close()
 			logs.Error("create tls config for http server fail, %s", err.Error())
 			return nil, err
 		}
@@ -312,15 +386,19 @@ func CreateHttpServer(addr, folder string,
 
 	fileHandler := &fileHandler{
 		route:       "/",
-		path:        folder,
-		allowUpload: upload,
-		allowDelete: delete,
+		path:        cfg.ServerDir,
+		allowUpload: cfg.UploadEnable,
+		allowDelete: cfg.DeleteEnable,
+		allowZip:    cfg.ZipEnable,
+		allowAuth:   cfg.AuthEnable,
 	}
+
+	copy(fileHandler.userList, cfg.AuthUsers)
 
 	httpserver := &http.Server{
 		Handler:      fileHandler,
-		ReadTimeout:  time.Duration(60) * time.Second,
-		WriteTimeout: time.Duration(60) * time.Second,
+		ReadTimeout:  time.Duration(cfg.Timeout) * time.Second,
+		WriteTimeout: time.Duration(cfg.Timeout) * time.Second,
 		TLSConfig:    tlsConfig,
 	}
 
@@ -332,30 +410,10 @@ func CreateHttpServer(addr, folder string,
 		err = httpserver.Serve(listen)
 		if err != nil {
 			logs.Error("http server attach listen instance fail, %s", err.Error())
+		} else {
+			httpserver.Close()
 		}
 	}()
 
 	return fileHandler, nil
 }
-
-// func HttpServer(addr string, folder string, cert, key string) error {
-
-// 	mux := http.DefaultServeMux
-
-// 	fileHandler := &fileHandler{
-// 		route:       "/",
-// 		path:        folder,
-// 		allowUpload: true,
-// 		allowDelete: true,
-// 	}
-
-// 	mux.Handle("/", fileHandler)
-
-// 	logs.Info("http file server listening on %s", addr)
-
-// 	if cert != "" && key != "" {
-// 		return http.ListenAndServeTLS(addr, cert, key, mux)
-// 	}
-
-// 	return http.ListenAndServe(addr, mux)
-// }

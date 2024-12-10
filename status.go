@@ -7,34 +7,44 @@ import (
 	. "github.com/lxn/walk/declarative"
 )
 
-var statusFlow *walk.StatusBarItem
+var dataFlow *walk.StatusBarItem
 var sessionFlow *walk.StatusBarItem
 var requestFlow *walk.StatusBarItem
 
-func StatusUpdate(flow int64, session int64, request int64) {
-	if statusFlow != nil {
-		statusFlow.SetText(fmt.Sprintf("DataFlow: %s", ByteView(flow)))
-		sessionFlow.SetText(fmt.Sprintf("Session: %d", session))
-		requestFlow.SetText(fmt.Sprintf("Request: %d", request))
+func StatusRequestUpdate(cnt int64) {
+	if requestFlow != nil {
+		requestFlow.SetText(fmt.Sprintf("REQUEST: %d", cnt))
+	}
+}
+
+func StatusSessionUpdate(cnt int64) {
+	if sessionFlow != nil {
+		sessionFlow.SetText(fmt.Sprintf("SESSION: %d", cnt))
+	}
+}
+
+func StatusFlowUpdate(flow int64) {
+	if dataFlow != nil {
+		dataFlow.SetText(fmt.Sprintf("DATAFLOW: %s", ByteView(flow)))
 	}
 }
 
 func StatusBarInit() []StatusBarItem {
 	return []StatusBarItem{
 		{
-			AssignTo: &statusFlow,
+			AssignTo: &dataFlow,
 			Text:     "",
 			Width:    120,
 		},
 		{
 			AssignTo: &sessionFlow,
 			Text:     "",
-			Width:    80,
+			Width:    120,
 		},
 		{
 			AssignTo: &requestFlow,
 			Text:     "",
-			Width:    80,
+			Width:    120,
 		},
 	}
 }

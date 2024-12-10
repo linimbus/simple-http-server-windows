@@ -31,9 +31,13 @@ type Config struct {
 
 	ListenAddr string
 	ListenPort int64
+	Timeout    int64
 
 	HttpsEnable bool
 	HttpsInfo   TlsInfo
+
+	ZipEnable   bool
+	AutoStartup bool
 }
 
 var configCache = Config{
@@ -46,9 +50,13 @@ var configCache = Config{
 
 	ListenAddr: "0.0.0.0",
 	ListenPort: 9000,
+	Timeout:    0,
 
 	HttpsEnable: false,
-	HttpsInfo:   TlsInfo{},
+	HttpsInfo:   TlsInfo{CA: "", Cert: "", Key: ""},
+
+	ZipEnable:   false,
+	AutoStartup: false,
 }
 
 var configFilePath string
@@ -105,6 +113,11 @@ func ListenPortSave(port int64) error {
 	return configSyncToFile()
 }
 
+func ListenTimeoutSave(port int64) error {
+	configCache.Timeout = port
+	return configSyncToFile()
+}
+
 func HttpsEnableSave(flag bool) error {
 	configCache.HttpsEnable = flag
 	return configSyncToFile()
@@ -112,6 +125,16 @@ func HttpsEnableSave(flag bool) error {
 
 func HttpsInfoSave(info TlsInfo) error {
 	configCache.HttpsInfo = info
+	return configSyncToFile()
+}
+
+func ZipEnableSave(flag bool) error {
+	configCache.ZipEnable = flag
+	return configSyncToFile()
+}
+
+func AutoStartupSave(flag bool) error {
+	configCache.AutoStartup = flag
 	return configSyncToFile()
 }
 
@@ -130,12 +153,16 @@ func ConfigInit() error {
 	value, err := os.ReadFile(configFilePath)
 	if err != nil {
 		logs.Error("read config file from app data dir fail, %s", err.Error())
+		configSyncToFile()
+
 		return err
 	}
 
 	err = json.Unmarshal(value, &configCache)
 	if err != nil {
 		logs.Error("json unmarshal config fail, %s", err.Error())
+		configSyncToFile()
+
 		return err
 	}
 

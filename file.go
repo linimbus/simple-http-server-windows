@@ -11,7 +11,7 @@ func RunlogDirGet() string {
 	dir := fmt.Sprintf("%s\\runlog", DEFAULT_HOME)
 	_, err := os.Stat(dir)
 	if err != nil {
-		os.MkdirAll(dir, 644)
+		os.MkdirAll(dir, 0644)
 	}
 	return dir
 }
@@ -20,7 +20,7 @@ func ConfigDirGet() string {
 	dir := fmt.Sprintf("%s\\config", DEFAULT_HOME)
 	_, err := os.Stat(dir)
 	if err != nil {
-		os.MkdirAll(dir, 644)
+		os.MkdirAll(dir, 0644)
 	}
 	return dir
 }
@@ -42,7 +42,7 @@ func appDataDirInit() error {
 	dir := appDataDir()
 	_, err := os.Stat(dir)
 	if err != nil {
-		err = os.MkdirAll(dir, 644)
+		err = os.MkdirAll(dir, 0644)
 		if err != nil {
 			return err
 		}

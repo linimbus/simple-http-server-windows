@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 
 	"github.com/astaxie/beego/logs"
 	"github.com/lxn/walk"
@@ -13,21 +14,23 @@ func IconLoadFromBox(filename string, size walk.Size) *walk.Icon {
 		logs.Error(err.Error())
 		return nil
 	}
-	dir := DEFAULT_HOME + "\\icon\\"
+	dir := filepath.Join(DEFAULT_HOME, "icon")
 	_, err = os.Stat(dir)
 	if err != nil {
-		err = os.MkdirAll(dir, 644)
+		err = os.MkdirAll(dir, 0644)
 		if err != nil {
 			logs.Error(err.Error())
 			return nil
 		}
 	}
-	filepath := dir + filename
+	filepath := filepath.Join(dir, filename)
 	err = SaveToFile(filepath, body)
 	if err != nil {
 		logs.Error(err.Error())
 		return nil
 	}
+	logs.Info("load icon file, %s", filepath)
+
 	icon, err := walk.NewIconFromFileWithSize(filepath, size)
 	if err != nil {
 		logs.Error(err.Error())
@@ -41,11 +44,11 @@ var ICON_Start *walk.Icon
 var ICON_Stop *walk.Icon
 
 var ICON_Max_Size = walk.Size{
-	Width: 128, Height: 128,
+	Width: 256, Height: 256,
 }
 
 var ICON_Min_Size = walk.Size{
-	Width: 48, Height: 48,
+	Width: 64, Height: 64,
 }
 
 func IconInit() error {

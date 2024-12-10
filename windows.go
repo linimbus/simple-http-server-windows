@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/astaxie/beego/logs"
 	"github.com/lxn/walk"
@@ -17,8 +18,26 @@ var mainWindow *walk.MainWindow
 var mainWindowWidth = 500
 var mainWindowHeight = 200
 
+func init() {
+	go func() {
+		for {
+			if mainWindow != nil && mainWindow.Visible() {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		ServerAutoStartup()
+	}()
+}
+
 func MenuBarInit() []MenuItem {
 	return []MenuItem{
+		Action{
+			Text: "Exit",
+			OnTriggered: func() {
+				CloseWindows()
+			},
+		},
 		Action{
 			Text: "Runlog",
 			OnTriggered: func() {
@@ -49,19 +68,13 @@ func MenuBarInit() []MenuItem {
 				AboutAction()
 			},
 		},
-		Action{
-			Text: "Close Windows",
-			OnTriggered: func() {
-				CloseWindows()
-			},
-		},
 	}
 }
 
-var listenPort *walk.NumberEdit
+var listenPort, listenTimeout *walk.NumberEdit
 var listenAddr *walk.ComboBox
-var httpsEnable, authEnable, deleteEnable, uploadEnable *walk.CheckBox
-var accessURL, active *walk.PushButton
+var httpsEnable, authEnable, deleteEnable, uploadEnable, zipEnable, autoRun *walk.CheckBox
+var serverFolderBut, accessURL, active *walk.PushButton
 var serverFolder *walk.LineEdit
 var serverInstance *fileHandler
 var mutex sync.Mutex
@@ -88,21 +101,8 @@ func ServerRunning() bool {
 }
 
 func ServerStart() error {
-	addr := ConfigGet().ListenAddr
-	var listenAddr string
-	if strings.Contains(addr, ":") {
-		listenAddr = fmt.Sprintf("[%s]:%d", addr, ConfigGet().ListenPort)
-	} else {
-		listenAddr = fmt.Sprintf("%s:%d", addr, ConfigGet().ListenPort)
-	}
 	var err error
-	serverInstance, err = CreateHttpServer(listenAddr,
-		ConfigGet().ServerDir,
-		ConfigGet().UploadEnable,
-		ConfigGet().DeleteEnable,
-		ConfigGet().HttpsEnable,
-		ConfigGet().HttpsInfo.Cert,
-		ConfigGet().HttpsInfo.Key)
+	serverInstance, err = CreateHttpServer(ConfigGet())
 	if err != nil {
 		return err
 	}
@@ -118,9 +118,56 @@ func ServerShutdown() error {
 	return nil
 }
 
+func ServerStatus(flag bool) {
+	accessURL.SetEnabled(flag)
+
+	serverFolder.SetEnabled(!flag)
+	serverFolderBut.SetEnabled(!flag)
+	listenPort.SetEnabled(!flag)
+	listenTimeout.SetEnabled(!flag)
+	listenAddr.SetEnabled(!flag)
+	httpsEnable.SetEnabled(!flag)
+	authEnable.SetEnabled(!flag)
+	deleteEnable.SetEnabled(!flag)
+	uploadEnable.SetEnabled(!flag)
+	zipEnable.SetEnabled(!flag)
+	autoRun.SetEnabled(!flag)
+}
+
+func ServerAutoStartup() {
+	if !ConfigGet().AutoStartup {
+		return
+	}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	active.SetEnabled(false)
+	defer active.SetEnabled(true)
+
+	if ServerRunning() {
+		return
+	}
+
+	err := ServerStart()
+	if err != nil {
+		logs.Warning("http server auto startup failed, %s", err.Error())
+		return
+	}
+
+	if ServerRunning() {
+		active.SetImage(ICON_Stop)
+	} else {
+		active.SetImage(ICON_Start)
+	}
+	ServerStatus(ServerRunning())
+}
+
 func ServerSwitch() {
 	mutex.Lock()
 	defer mutex.Unlock()
+
+	time.Sleep(time.Millisecond * 500)
 
 	var err error
 	if ServerRunning() {
@@ -134,12 +181,12 @@ func ServerSwitch() {
 	}
 
 	if ServerRunning() {
-		accessURL.SetEnabled(true)
 		active.SetImage(ICON_Stop)
 	} else {
-		accessURL.SetEnabled(false)
 		active.SetImage(ICON_Start)
 	}
+	ServerStatus(ServerRunning())
+
 	active.SetEnabled(true)
 }
 
@@ -190,8 +237,9 @@ func ConsoleWidget() []Widget {
 					},
 				},
 				PushButton{
-					MaxSize: Size{Width: 30},
-					Text:    " ... ",
+					AssignTo: &serverFolderBut,
+					MaxSize:  Size{Width: 30},
+					Text:     " ... ",
 					OnClicked: func() {
 						dlgDir := new(walk.FileDialog)
 						dlgDir.FilePath = ConfigGet().ServerDir
@@ -215,63 +263,86 @@ func ConsoleWidget() []Widget {
 		Label{
 			Text: "Listen Address: ",
 		},
-		ComboBox{
-			AssignTo: &listenAddr,
-			CurrentIndex: func() int {
-				addr := ConfigGet().ListenAddr
-				for i, item := range interfaceList {
-					if addr == item {
-						return i
-					}
-				}
-				return 0
-			},
-			Model: interfaceList,
-			OnCurrentIndexChanged: func() {
-				err := ListenAddressSave(listenAddr.Text())
-				if err != nil {
-					ErrorBoxAction(mainWindow, err.Error())
-				} else {
-					BrowseURLUpdate()
-				}
-			},
-			OnBoundsChanged: func() {
-				addr := ConfigGet().ListenAddr
-				for i, item := range interfaceList {
-					if addr == item {
-						listenAddr.SetCurrentIndex(i)
-						return
-					}
-				}
-				listenAddr.SetCurrentIndex(0)
-			},
-		},
-		Label{
-			Text: "Listen Port: ",
-		},
-		NumberEdit{
-			AssignTo:    &listenPort,
-			Value:       float64(ConfigGet().ListenPort),
-			ToolTipText: "1~65535",
-			MaxValue:    65535,
-			MinValue:    1,
-			OnValueChanged: func() {
-				err := ListenPortSave(int64(listenPort.Value()))
-				if err != nil {
-					ErrorBoxAction(mainWindow, err.Error())
-				} else {
-					BrowseURLUpdate()
-				}
+		Composite{
+			Layout: HBox{MarginsZero: true},
+			Children: []Widget{
+				ComboBox{
+					AssignTo: &listenAddr,
+					CurrentIndex: func() int {
+						addr := ConfigGet().ListenAddr
+						for i, item := range interfaceList {
+							if addr == item {
+								return i
+							}
+						}
+						return 0
+					},
+					Model: interfaceList,
+					OnCurrentIndexChanged: func() {
+						err := ListenAddressSave(listenAddr.Text())
+						if err != nil {
+							ErrorBoxAction(mainWindow, err.Error())
+						} else {
+							BrowseURLUpdate()
+						}
+					},
+					OnBoundsChanged: func() {
+						addr := ConfigGet().ListenAddr
+						for i, item := range interfaceList {
+							if addr == item {
+								listenAddr.SetCurrentIndex(i)
+								return
+							}
+						}
+						listenAddr.SetCurrentIndex(0)
+					},
+				},
+				Label{
+					Text: "Port: ",
+				},
+				NumberEdit{
+					AssignTo:    &listenPort,
+					Value:       float64(ConfigGet().ListenPort),
+					ToolTipText: "1~65535",
+					MaxValue:    65535,
+					MinValue:    1,
+					OnValueChanged: func() {
+						err := ListenPortSave(int64(listenPort.Value()))
+						if err != nil {
+							ErrorBoxAction(mainWindow, err.Error())
+						} else {
+							BrowseURLUpdate()
+						}
+					},
+				},
+				Label{
+					Text: "Timeout: ",
+				},
+				NumberEdit{
+					AssignTo:    &listenTimeout,
+					Value:       float64(ConfigGet().Timeout),
+					ToolTipText: "0~3600 seconds",
+					MaxValue:    3600,
+					MinValue:    0,
+					OnValueChanged: func() {
+						err := ListenTimeoutSave(int64(listenTimeout.Value()))
+						if err != nil {
+							ErrorBoxAction(mainWindow, err.Error())
+						}
+					},
+				},
+				Label{
+					Text: " Seconds",
+				},
 			},
 		},
 		VSpacer{},
 		Composite{
-			Layout: HBox{Margins: Margins{Top: 0, Bottom: 0, Left: 5, Right: 5}},
+			Layout: Grid{Columns: 3, MarginsZero: true},
 			Children: []Widget{
 				CheckBox{
 					AssignTo: &httpsEnable,
 					Text:     "Https Enable",
-					Enabled:  false,
 					Checked:  ConfigGet().HttpsEnable,
 					OnCheckedChanged: func() {
 						err := HttpsEnableSave(httpsEnable.Checked())
@@ -285,7 +356,6 @@ func ConsoleWidget() []Widget {
 				CheckBox{
 					AssignTo: &authEnable,
 					Text:     "Auth Enable",
-					Enabled:  false,
 					Checked:  ConfigGet().AuthEnable,
 					OnCheckedChanged: func() {
 						err := UserEnableSave(authEnable.Checked())
@@ -316,6 +386,28 @@ func ConsoleWidget() []Widget {
 						}
 					},
 				},
+				CheckBox{
+					AssignTo: &zipEnable,
+					Text:     "Zip Enable",
+					Checked:  ConfigGet().ZipEnable,
+					OnCheckedChanged: func() {
+						err := ZipEnableSave(zipEnable.Checked())
+						if err != nil {
+							ErrorBoxAction(mainWindow, err.Error())
+						}
+					},
+				},
+				CheckBox{
+					AssignTo: &autoRun,
+					Text:     "Auto Startup",
+					Checked:  ConfigGet().AutoStartup,
+					OnCheckedChanged: func() {
+						err := AutoStartupSave(autoRun.Checked())
+						if err != nil {
+							ErrorBoxAction(mainWindow, err.Error())
+						}
+					},
+				},
 			},
 		},
 		VSpacer{},
@@ -324,7 +416,7 @@ func ConsoleWidget() []Widget {
 			Image:       ICON_Start,
 			Text:        " ",
 			ToolTipText: "Startup or Stop",
-			MinSize:     Size{Height: 48, Width: 48},
+			MinSize:     Size{Height: 64, Width: 64},
 			OnClicked: func() {
 				active.SetEnabled(false)
 				go ServerSwitch()
