@@ -253,9 +253,13 @@ func (f *fileHandler) AuthHandler(w http.ResponseWriter, r *http.Request) bool {
 	var authPass bool
 	var authUser UserInfo
 
-	userList := f.userList
-	for _, user := range userList {
-		if string(authInfo) == fmt.Sprintf("%s:%s", user.UserName, user.Password) {
+	logs.Info("http server auth info [%s]", string(authInfo))
+
+	for _, user := range f.userList {
+		userInfo := fmt.Sprintf("%s:%s", user.UserName, user.Password)
+		logs.Info("http server user [%s]", userInfo)
+
+		if string(authInfo) == userInfo {
 			authPass = true
 			authUser = user
 			break
@@ -391,6 +395,7 @@ func CreateHttpServer(cfg *Config) (*fileHandler, error) {
 		allowDelete: cfg.DeleteEnable,
 		allowZip:    cfg.ZipEnable,
 		allowAuth:   cfg.AuthEnable,
+		userList:    make([]UserInfo, len(cfg.AuthUsers)),
 	}
 
 	copy(fileHandler.userList, cfg.AuthUsers)
