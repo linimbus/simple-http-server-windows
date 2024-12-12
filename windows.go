@@ -223,12 +223,14 @@ func ConsoleWidget() []Widget {
 							stat, err := os.Stat(dir)
 							if err != nil {
 								ErrorBoxAction(mainWindow, "The server folder is not exist")
-								serverFolder.SetText(ConfigGet().ServerDir)
+								serverFolder.SetText("")
+								ServerDirSave("")
 								return
 							}
 							if !stat.IsDir() {
 								ErrorBoxAction(mainWindow, "The server folder is not directory")
-								serverFolder.SetText(ConfigGet().ServerDir)
+								serverFolder.SetText("")
+								ServerDirSave("")
 								return
 							}
 							return
