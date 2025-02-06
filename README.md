@@ -54,7 +54,7 @@ go install github.com/GeertJohan/go.rice/rice@latest
 ### 2.3 克隆代码
 
 ```
-git clone https://github.com/easymesh/autoproxy-windows.git
+git clone https://github.com/linimbus/simple-http-server-windows.git
 ```
 
 ### 2.4 编译脚本
