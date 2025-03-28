@@ -61,7 +61,7 @@ func TlsAction() {
 					HSpacer{},
 					PushButton{
 						AssignTo: &acceptPB,
-						Text:     "OK",
+						Text:     "Save",
 						OnClicked: func() {
 							if tlsCert.Text() != "" || tlsKey.Text() != "" {
 								_, err := CreateTlsConfig(tlsCert.Text(), tlsKey.Text())
@@ -82,6 +82,15 @@ func TlsAction() {
 							}
 
 							dlg.Accept()
+						},
+					},
+					HSpacer{},
+					PushButton{
+						Text: "Generate",
+						OnClicked: func() {
+							cert, key := GenerateKeyCert(ConfigGet().ListenAddr)
+							tlsCert.SetText(cert)
+							tlsKey.SetText(key)
 						},
 					},
 					HSpacer{},

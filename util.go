@@ -1,20 +1,29 @@
 package main
 
 import (
+	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/astaxie/beego/logs"
 	"github.com/lxn/walk"
+
+	mrand "math/rand"
 )
 
 func VersionGet() string {
-	return "v0.2.1"
+	return "v0.2.2"
 }
 
 func SaveToFile(name string, body []byte) error {
@@ -94,7 +103,7 @@ func GenerateUsername(length int) string {
 	charSet := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*_+-="
 	username := make([]byte, length)
 	for i := range username {
-		index := rand.Intn(len(charSet))
+		index := mrand.Intn(len(charSet))
 		username[i] = charSet[index]
 	}
 	return string(username)
@@ -128,4 +137,42 @@ func CreateTlsConfig(cert, key string) (*tls.Config, error) {
 		Certificates: []tls.Certificate{certs},
 		ClientAuth:   tls.RequestClientCert,
 	}, nil
+}
+
+func GenerateKeyCert(addr string) (string, string) {
+	max := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, _ := rand.Int(rand.Reader, max)
+	subject := pkix.Name{
+		Organization:       []string{"simple http server windows app"},
+		OrganizationalUnit: []string{"simple http server windows app"},
+		CommonName:         "simple http server windows app",
+	}
+
+	if addr == "0.0.0.0" || addr == "::" {
+		addr = "127.0.0.1"
+	}
+
+	ipAddress := make([]net.IP, 0)
+	ipAddress = append(ipAddress, net.ParseIP(addr))
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject:      subject,
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(30 * 24 * time.Hour),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses:  ipAddress,
+	}
+	pk, _ := rsa.GenerateKey(rand.Reader, 2048)
+
+	derBytes, _ := x509.CreateCertificate(rand.Reader, &template, &template, &pk.PublicKey, pk)
+
+	certOut := bytes.NewBuffer(make([]byte, 0))
+	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+
+	keyOut := bytes.NewBuffer(make([]byte, 0))
+	pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(pk)})
+
+	return certOut.String(), keyOut.String()
 }
