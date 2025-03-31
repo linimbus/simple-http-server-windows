@@ -1,5 +1,7 @@
 # 简易HTTP文件共享软件
 
+[![Download Simple-Http-File-Server](https://img.shields.io/sourceforge/dm/simple-http-file-server.svg)](https://sourceforge.net/projects/simple-http-file-server/files/latest/download)
+
 ## 软件版本 v0.2
 
 ## 1. 软件架构
